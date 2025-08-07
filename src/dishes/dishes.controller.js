@@ -1,71 +1,119 @@
 // the file needs to know where to loook for the data
 const path = require("path");
 const dishes = require(path.resolve("src/data/dishes-data.js"));
-
-// middleware to check the dish
-
-function validateDish(req, res, next) {
-  const { data: { name, description, price, image_url } = {} } = req.body;
-
-  if (!name || name === "") {
-    return next({
-      status: 400,
-      message: "Dish must include a name.",
-    });
-  }
-  if (!description || description === "") {
-    return next({
-      status: 400,
-      message: "Dish must include a description.",
-    });
-  }
-  if (!price || price <= 0 || typeof price !== "number") {
-    return next({
-      status: 400,
-      message: "Dish must include a price that is an integer greater than 0.",
-    });
-  }
-  if (!image_url || image_url === "") {
-    return next({
-      status: 400,
-      message: "Dish must include a image_url.",
-    });
-  }
-  res.locals.dishData = { name, description, price, image_url };
-  next();
-}
-// middleware to check if the dish exists
+// use to assign Ids
+const nextId = require("../utils/nextId");
+// chekcing if the dish exists
 function dishExists(req, res, next) {
-  const { dishId } = req.params;
+  const dishId = String(req.params.dishId);
   const foundDish = dishes.find((dish) => dish.id === dishId);
-
-  if (!foundDish) {
-    return next({
-      status: 404,
-      message: `Dish does not exist: ${dishId}`,
+  if (foundDish) {
+    res.locals.dish = foundDish;
+    return next();
+  }
+  next({
+    status: 404,
+    message: `Dish does not exist: ${dishId}`,
+  });
+}
+// checking if the dish id in the body matches the dish id in the route
+function dishOrderIdIsValid(req, res, next) {
+  const dishId = req.params.dishId;
+  const { data: { id } = {} } = req.body;
+  if (id === dishId || !id) {
+    return next();
+  }
+  next({
+    status: 400,
+    message: `Dish id does not match route id. Dish: ${id}, Route: ${dishId}`,
+  });
+}
+// checking if the body has the required property
+function bodyDataHasProperty(propertyName) {
+  return function (req, res, next) {
+    const { data = {} } = req.body;
+    if (data[propertyName]) {
+      return next();
+    }
+    next({ status: 400, message: `Dish must include a '${propertyName}'` });
+  };
+}
+// checking if the price is a valid number
+function priceIsValidNumber(req, res, next) {
+  const { data: { price } = {} } = req.body;
+  if (price <= 0 || !Number.isInteger(price)) {
+    next({
+      status: 400,
+      message: `'price' requires a valid number, but was: ${price}`,
     });
   }
-
-  res.locals.dish = foundDish;
   next();
 }
 
-function validateDishId(req, _, next) {
-  const { dishId } = req.params;
-  const { data: { id } = {} } = req.body;
+// crud functions for dishes
+function create(req, res) {
+  const { data: { name, description, price, image_url } = {} } = req.body;
+  const newDish = {
+    id: nextId(),
+    name,
+    description,
+    price,
+    image_url,
+  };
+  dishes.push(newDish);
+  res.status(201).json({ data: newDish });
+}
 
-  if (id && id !== dishId) {
-    return next({
+function list(req, res) {
+  res.json({ data: dishes });
+}
+
+function read(req, res) {
+  const { dish } = res.locals;
+
+  res.json({ data: dish });
+}
+
+function update(req, res, next) {
+  const dish = res.locals.dish;
+  const { data: { id, name, description, price, image_url } = {} } = req.body;
+
+  if (id !== dish.id) {
+    next({
       status: 400,
-      message: `Dish id does not match route id. Dish: ${id}, Route: ${dishId}`,
+      message: `Update request dish id: ${id} does not match the target dish id: ${dish.id}`,
     });
   }
 
-  next();
+  // Updating the dish
+  dish.name = name;
+  dish.description = description;
+  dish.price = price;
+  dish.image_url = image_url;
+
+  res.json({ data: dish });
 }
 
 module.exports = {
-  validateDish,
+  create: [
+    bodyDataHasProperty("name"),
+    bodyDataHasProperty("description"),
+    bodyDataHasProperty("price"),
+    bodyDataHasProperty("image_url"),
+    priceIsValidNumber,
+    create,
+  ],
+  list,
+  read: [dishExists, read],
+  update: [
+    dishExists,
+    dishOrderIdIsValid,
+    bodyDataHasProperty("name"),
+    bodyDataHasProperty("description"),
+    bodyDataHasProperty("price"),
+    bodyDataHasProperty("image_url"),
+    priceIsValidNumber,
+    update,
+  ],
   dishExists,
-  validateDishId,
 };
