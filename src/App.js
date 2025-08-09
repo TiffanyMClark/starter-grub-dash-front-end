@@ -1,17 +1,21 @@
-import React from "react";
-import { Route, Switch } from "react-router-dom";
-import Layout from "./layout/Layout";
+const express = require("express");
+const cors = require("cors");
 
-function App() {
-  return (
-    <div className="app-routes">
-      <Switch>
-        <Route path="/">
-          <Layout />
-        </Route>
-      </Switch>
-    </div>
-  );
-}
+const errorHandler = require("./errors/errorHandler");
+const notFound = require("./errors/notFound");
+const ordersRouter = require("./orders/orders.router");
+const dishesRouter = require("./dishes/dishes.router");
 
-export default App;
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.use("/dishes", dishesRouter);
+app.use("/orders", ordersRouter);
+
+app.use(notFound);
+
+app.use(errorHandler);
+
+module.exports = app;
