@@ -1,25 +1,19 @@
-const router = require("express").Router({ mergeParams: true });
-const controller = require("./dishes.controller");
-const {
-  validateDish,
-  dishExists,
-  validateDishId,
-} = require("./dishes.middleware");
+const router = require("express").Router();
+const dishesController = require("./dishes.controller");
 const methodNotAllowed = require("../errors/methodNotAllowed");
 
+//  handling dish list and dish creation
 router
   .route("/")
-  .get(controller.list)
-  .post(controller.validateDish, controller.create)
+  .get(dishesController.list)
+  .post(dishesController.create)
   .all(methodNotAllowed);
 
+// handling individual dish
 router
   .route("/:dishId")
-  .get(controller.dishExists, controller.read)
-  .put(
-    controller.dishExists,
-    controller.validateDish,
-    controller.validateDishId,
-    controller.update
-  )
+  .get(dishesController.read)
+  .put(dishesController.update)
   .all(methodNotAllowed);
+
+module.exports = router;

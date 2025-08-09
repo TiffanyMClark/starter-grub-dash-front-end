@@ -1,166 +1,121 @@
 const path = require("path");
+
+// Use the existing order data
 const orders = require(path.resolve("src/data/orders-data"));
+
+// using to generate unique ids
 const nextId = require("../utils/nextId");
-
-// middleware for orders that must exist
-function orderExists(req, res, next) {
-  const { orderId } = req.params;
-  const order = orders.find((o) => o.id === orderId);
-
-  if (!order) {
-    return res
-      .status(404)
-      .json({ error: `Order with id ${orderId} not found` });
-  }
-
-  res.locals.order = order;
-  next();
-}
-// and then middleware for validating order
-function validateOrderBody(req, res, next) {
-  const { data: { deliverTo, mobileNumber, status, dishes } = {} } = req.body;
-
-  if (!deliverTo || deliverTo === "") {
-    return next({ status: 400, message: "Order must include a deliverTo" });
-  }
-  if (!mobileNumber || mobileNumber === "") {
-    return next({ status: 400, message: "Order must include a mobileNumber" });
-  }
-  if (!dishes || !Array.isArray(dishes) || dishes.length === 0) {
-    return next({
-      status: 400,
-      message: "Order must include at least one dish",
-    });
-  }
-
-  for (let i = 0; i < dishes.length; i++) {
-    const dish = dishes[i];
+const validation = require("../utils/validation");
+const { isIdMatchingWithRouteId } = require("../utils/validation");
+// Validate dishes quantity
+function validateDishesQuantity(req, res, next) {
+  const data = req.body.data;
+  data.dishes.forEach((dish, index) => {
     if (
       !dish.quantity ||
       typeof dish.quantity !== "number" ||
-      dish.quantity <= 0
+      dish.quantity < 0
     ) {
-      return next({
+      next({
         status: 400,
-        message: `Dish ${i} must have a quantity that is an integer greater than 0`,
+        message: `Dish ${index} must have a quantity that is an integer greater than 0`,
       });
     }
-  }
-
-  res.locals.orderData = { deliverTo, mobileNumber, status, dishes };
+  });
   next();
 }
-
-// middleware for status
-function validateStatus(req, res, next) {
-  const { status } = res.locals.orderData;
-
-  const validStatuses = [
-    "pending",
-    "preparing",
-    "out-for-delivery",
-    "delivered",
-  ];
-  if (!status || !validStatuses.includes(status)) {
-    return next({
-      status: 400,
-      message:
-        "Order must have a status of pending, preparing, out-for-delivery, delivered",
-    });
-  }
-
-  if (res.locals.order.status === "delivered") {
-    return next({
-      status: 400,
-      message: "A delivered order cannot be changed",
-    });
-  }
-
-  next();
-}
-
-// middleware for Id in matching route
-function validateMatchingId(req, res, next) {
+// Check if order exists
+function isExists(req, res, next) {
   const { orderId } = req.params;
-  const { data: { id } = {} } = req.body;
-
-  if (id && id !== orderId) {
-    return next({
-      status: 400,
-      message: `Order id does not match route id. Order: ${id}, Route: ${orderId}`,
+  const orderFound = orders.find((order) => order.id === orderId);
+  if (orderFound) {
+    res.locals.order = orderFound;
+    next();
+  } else {
+    next({
+      status: 404,
+      message: `Order does not exist: ${orderId}.`,
     });
   }
-
-  next();
 }
-
-// middleware deleting
-function validateDeletable(req, res, next) {
-  if (res.locals.order.status !== "pending") {
-    return next({
+// Check if status is invalid
+function isStatusInValid(req, res, next) {
+  const body = req.body.data;
+  if (body.status === "invalid") {
+    next({
       status: 400,
-      message: "An order cannot be deleted unless it is pending",
+      message: "status is invalid",
     });
+  } else {
+    next();
   }
-  next();
 }
-// list of orders
-function list(req, res) {
-  res.json({ data: orders });
+// Update an existing order
+function update(req, res) {
+  const order = res.locals.order;
+  const body = req.body.data;
+  let id;
+  if (body.id) {
+    id = body.id;
+  } else {
+    id = order.id;
+  }
+  res.json({ data: { ...body, id } });
 }
-
-function read(req, res) {
-  res.json({ data: res.locals.order });
-}
-
-function create(req, res) {
-  const { deliverTo, mobileNumber, dishes } = res.locals.orderData;
+// Create a new order
+function create(req, res, next) {
+  const { data } = req.body;
   const newOrder = {
     id: nextId(),
-    deliverTo,
-    mobileNumber,
-    status: "pending",
-    dishes,
+    ...data,
   };
   orders.push(newOrder);
   res.status(201).json({ data: newOrder });
 }
-// update order
-function update(req, res) {
+// Read an existing order
+function read(req, res) {
   const order = res.locals.order;
-  const { deliverTo, mobileNumber, status, dishes } = res.locals.orderData;
-
-  order.deliverTo = deliverTo;
-  order.mobileNumber = mobileNumber;
-  order.status = status;
-  order.dishes = dishes;
-
-  res.json({ data: order });
+  res.status(200).json({ data: order });
 }
-
-// delete order
-function deleteOrder(req, res) {
+// List all existing orders
+function list(req, res) {
+  res.status(200).json({ data: orders });
+}
+// Delete an existing order
+function destroy(req, res, next) {
   const { orderId } = req.params;
   const index = orders.findIndex((order) => order.id === orderId);
-  orders.splice(index, 1);
-  res.sendStatus(204);
+  if (orders[index].status === "pending") {
+    orders.splice(index, 1);
+    res.sendStatus(204);
+  } else {
+    next({
+      status: 400,
+      message: "status is in pending",
+    });
+  }
 }
 
 module.exports = {
   list,
-  read: [orderExists, read],
-  create: [validateOrderBody, create],
+  read: [isExists, read],
+  create: [
+    validation.validateObjectStringKeys("deliverTo", "Order"),
+    validation.validateObjectStringKeys("mobileNumber", "Order"),
+    validation.validateObjectArrayKeys("dishes", "Order"),
+    validateDishesQuantity,
+    create,
+  ],
   update: [
-    orderExists,
-    validateOrderBody,
-    validateMatchingId,
-    validateStatus,
+    isExists,
+    isIdMatchingWithRouteId("orderId", "Order"),
+    validation.validateObjectStringKeys("status", "Order"),
+    validation.validateObjectStringKeys("deliverTo", "Order"),
+    validation.validateObjectStringKeys("mobileNumber", "Order"),
+    validation.validateObjectArrayKeys("dishes", "Order"),
+    validateDishesQuantity,
+    isStatusInValid,
     update,
   ],
-  deleteOrder: [orderExists, validateDeletable, deleteOrder],
-  orderExists,
-  validateOrderBody,
-  validateMatchingId,
-  validateStatus,
-  validateDeletable,
+  delete: [isExists, destroy],
 };
